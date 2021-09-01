@@ -877,11 +877,27 @@ if run_HPC_speech:
   import tensorflow as tf
   from tensorflow import keras
   from tensorflow.keras import layers
+  import matplotlib.pyplot as plt
+  import matplotlib.gridspec as gridspec
 
-  frame_length = 128
-  hop_length = 128
+  frame_length = 64
+  hop_length = 64
 
-  sr, x = wavfile.read(pysptk.util.example_audio_file())
+  #sr, x = wavfile.read(pysptk.util.example_audio_file())
+
+  sr = 256
+  wave_hz = 10
+  duration = 1
+  t = np.linspace(0, duration, sr, endpoint=False)
+  x = signal.square(2 * np.pi * wave_hz * t)
+  plt.plot(t, x)
+  plt.show()
+
+  #ime = np.arange(0, 10, 0.1)
+  #amplitude = np.sin(time)
+  #plot.plot(time, amplitude)
+  #plt.show()
+
   x = x.astype(np.float32)
   x /= np.abs(x).max()
   train_target = x
@@ -890,10 +906,10 @@ if run_HPC_speech:
 
   # windowed outputs
   frames_se = librosa.util.frame(train_target, frame_length=frame_length, hop_length=hop_length).astype(np.float64).T
-  frames_se *= pysptk.blackman(frame_length)
+  #frames_se *= pysptk.blackman(frame_length)
   frames_se = np.expand_dims(frames_se, axis=-1)
-  frames_se *= 100
-  frames_se += 1
+  #frames_se *= 100
+  frames_se += 0.5
   frames = frames_se
 
   # Dataset from frames
@@ -908,12 +924,12 @@ if run_HPC_speech:
   data = np.squeeze(dataset.next())
 
   xdim = 1
-  lr_A = 0.001
-  lr_x = 0.01
-  lr_TD = 0.01
-  updates_A_TD = 10
-  updates_A = 2
-  updates_xhat = 3
+  lr_A = 0.01 #0.001
+  lr_x = 0.1 #0.1
+  lr_TD = 0.01 #0.1
+  updates_A_TD = 10 #10
+  updates_A = 1 #2
+  updates_xhat = 3 #3
 
   alphas = np.linspace(0,1,updates_A_TD+1)
   alphas_A = np.linspace(0, 1, updates_A + 1)
@@ -925,6 +941,8 @@ if run_HPC_speech:
   loss_hierarchical = []
   loss_single = []
 
+  plot_interval = 2
+
   with tf.GradientTape(persistent=True) as tapeKF:
     A_TD = tf.Variable(initial_value=tf.zeros([order, order]) * 0.1, trainable=True, name="A_TD")
     F = tf.Variable(initial_value=tf.random.uniform([order, order]) * 0.1, trainable=True, name="F")
@@ -933,8 +951,11 @@ if run_HPC_speech:
     xhat_TD = tf.Variable(initial_value=tf.zeros([order]), trainable=True, name="xhat_TD")
     xhat = tf.Variable(initial_value=tf.zeros([order]), trainable=True, name="xhat")
 
+  f, axs = plt.subplots(ncols=2, nrows=int(updates_A_TD/plot_interval-1), constrained_layout=True)
+  plt_col = -1
   for use_top_down in [True, False]:
-    f = plt.figure()
+    plt_col += 1
+    plt_row = -1
     for update_A_TD in range(updates_A_TD):
       for update_A in range(updates_A):
         with tapeKF:
@@ -949,10 +970,12 @@ if run_HPC_speech:
           phat = tf.random.uniform([order, order]) * 1.
           C = tf.eye(order)
           ohats = []
+          ohats_posterior = []
           MSE_seq = 0.
           if not use_top_down: xhat_TD = tf.zeros_like(xhat_TD)
         for n in range(data.shape[0] - 1):
           y = data[n, 1]
+          ohats.append(tf_dot(H, tf_dot(F, xhat) + tf_dot(G, xhat_TD)).numpy())  # prediction from prior
           for update_x in range(updates_xhat):
               with tapeKF:
                 xhat_both = tf_dot(F, xhat) + tf_dot(G, xhat_TD)
@@ -967,26 +990,32 @@ if run_HPC_speech:
               optimizer_TD.apply_gradients(zip(tapeKF.gradient(MSE, [G]), [G]))
               optimizer_x.apply_gradients(zip(tapeKF.gradient(MSE, [xhat]), [xhat]))
           with tapeKF:
-            ohats.append(tf_dot(H, xhat_both).numpy())
             MSE_seq = MSE_seq+MSE
+          ohats_posterior.append(tf_dot(H, tf_dot(F, xhat) + tf_dot(G, xhat_TD)).numpy())  # prediction from posterior
         grad = tapeKF.gradient(MSE_seq, [A])
         optimizer_A.apply_gradients(zip(grad, [A]))
-        if update_A == 0:
+        xhat_TD = tf.identity(xhat)
+
+      if update_A_TD % plot_interval == 0:
+        if not update_A_TD == 0:
+          plt_row += 1
           info = "Update A_TD:"+str(update_A_TD)+" Update A:"+str(update_A)+" MSE:"+str(MSE.numpy())
           print(info)
-
           if update_A_TD == updates_A_TD-1:
-            plt.plot(data[:, 1], label="Target signal", color="black")
-            plt.plot(ohats, label="Prediction from state prior", color="blue", alpha=alphas[update_A_TD])
+            axs[plt_row, plt_col].plot(data[:, 1], label="Target signal", color="black")
+            axs[plt_row, plt_col].plot(ohats, label="Prior prediction", color="blue")
+            axs[plt_row, plt_col].plot(ohats_posterior, label="Posterior prediction", color="green")
+            axs[plt_row, plt_col].set_title('Trial '+ str(update_A_TD))
           else:
-            plt.plot(data[:, 1], color="black")
-            plt.plot(ohats, color="blue",  alpha=alphas[update_A_TD])
-        else:
-          if update_A == updates_A-1 and update_A_TD == updates_A_TD-1:
-            plt.plot(ohats, color="green", label="Prediction from state posterior", alpha=alphas_A[update_A] * alphas[update_A_TD])
-          else:
-            plt.plot(ohats, color="green", alpha=alphas_A[update_A]*alphas[update_A_TD])
-        xhat_TD = tf.identity(xhat)
+            axs[plt_row, plt_col].plot(data[:, 1], color="black")
+            #axs[plt_row, plt_col].plot(ohats, color="blue",  alpha=alphas[update_A_TD])
+            axs[plt_row, plt_col].plot(ohats, color="blue")
+            axs[plt_row, plt_col].plot(ohats_posterior, label="Posterior prediction", color="green")
+          axs[plt_row, plt_col].grid()
+          axs[plt_row, plt_col].set_ylim([-1, 2.])
+          #axs[plt_row, plt_col].set_xlim([0., 16.])
+
+    """
     plt.xlabel("Time (samples)")
     plt.ylabel("Amplitude")
     plt.grid()
@@ -1002,6 +1031,9 @@ if run_HPC_speech:
       plt.tight_layout()
       f.savefig("./singlelayer.pdf")
       plt.show()
+    """
+  f.savefig("./bothh.pdf")
+  plt.show()
 
   f = plt.figure()
   plt.plot(loss_hierarchical)
