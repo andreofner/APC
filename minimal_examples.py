@@ -544,7 +544,7 @@ if run_PC_speech:
               ex = tf.reduce_mean(tf.math.square(xhat - (tf_dot(A, xhat)))) #+ tf_dot(B, u))
               ey = tf.reduce_mean(tf.math.square(y - tf_dot(C, xhat)))
               MSE = ex + ey
-            grad_x = tapeKF.gradient(MSE, [xhat])
+            grad_x = tapeKF.gradient(ex, [xhat])
             optimizer_x.apply_gradients(zip(grad_x, [xhat]))
       else:
         with tapeKF:
@@ -924,12 +924,12 @@ if run_HPC_speech:
   data = np.squeeze(dataset.next())
 
   xdim = 1
-  lr_A = 0.01 #0.001
+  lr_A = 0.1 #0.001
   lr_x = 0.1 #0.1
   lr_TD = 0.01 #0.1
   updates_A_TD = 10 #10
   updates_A = 1 #2
-  updates_xhat = 3 #3
+  updates_xhat = 5 #3
 
   alphas = np.linspace(0,1,updates_A_TD+1)
   alphas_A = np.linspace(0, 1, updates_A + 1)
@@ -1005,15 +1005,17 @@ if run_HPC_speech:
             axs[plt_row, plt_col].plot(data[:, 1], label="Target signal", color="black")
             axs[plt_row, plt_col].plot(ohats, label="Prior prediction", color="blue")
             axs[plt_row, plt_col].plot(ohats_posterior, label="Posterior prediction", color="green")
-            axs[plt_row, plt_col].set_title('Trial '+ str(update_A_TD))
           else:
             axs[plt_row, plt_col].plot(data[:, 1], color="black")
-            #axs[plt_row, plt_col].plot(ohats, color="blue",  alpha=alphas[update_A_TD])
             axs[plt_row, plt_col].plot(ohats, color="blue")
             axs[plt_row, plt_col].plot(ohats_posterior, label="Posterior prediction", color="green")
           axs[plt_row, plt_col].grid()
+          axs[plt_row, plt_col].scatter(x=[0], y=[ohats[0]], c='b')
+          axs[plt_row, plt_col].scatter(x=[0], y=[ohats_posterior[0]], c='g')
           axs[plt_row, plt_col].set_ylim([-1, 2.])
-          #axs[plt_row, plt_col].set_xlim([0., 16.])
+          axs[plt_row, plt_col].set_xlabel("Time (samples)")
+          axs[plt_row, plt_col].set_ylabel("Amplitude")
+          axs[plt_row, plt_col].title.set_text('Update ' + str(update_A_TD))
 
     """
     plt.xlabel("Time (samples)")
