@@ -890,8 +890,8 @@ if run_HPC_speech:
   duration = 1
   t = np.linspace(0, duration, sr, endpoint=False)
   x = signal.square(2 * np.pi * wave_hz * t)
-  plt.plot(t, x)
-  plt.show()
+  #plt.plot(t, x)
+  #plt.show()
 
   #ime = np.arange(0, 10, 0.1)
   #amplitude = np.sin(time)
@@ -909,7 +909,7 @@ if run_HPC_speech:
   #frames_se *= pysptk.blackman(frame_length)
   frames_se = np.expand_dims(frames_se, axis=-1)
   #frames_se *= 100
-  frames_se += 0.5
+  frames_se += 2.
   frames = frames_se
 
   # Dataset from frames
@@ -929,148 +929,147 @@ if run_HPC_speech:
   lr_F = 0.01 #0.1
   lr_G = 0.01 #0.1
 
-  updates_A_TD = 20 #10
-  updates_A = 1 #2
-  updates_xhat = 5 #3
+  updates_A_TD = 3 #20
+  updates_A = 1 #1
 
-  alphas = np.linspace(0,1,updates_A_TD+1)
-  alphas_A = np.linspace(0, 1, updates_A + 1)
+  plot_interval = 1
 
-  optimizer_F = tf.keras.optimizers.Adam(learning_rate=lr_F)
-  optimizer_G = tf.keras.optimizers.Adam(learning_rate=lr_G)
-  optimizer_A = tf.keras.optimizers.Adam(learning_rate=lr_A)
-  optimizer_x = tf.keras.optimizers.Adam(learning_rate=lr_x)
+  for updates_xhat in [3, 5, 10, 15, 20]:
+    alphas = np.linspace(0,1,updates_A_TD+1)
+    alphas_A = np.linspace(0, 1, updates_A + 1)
 
-  loss_hierarchical = []
-  loss_single = []
+    optimizer_F = tf.keras.optimizers.Adam(learning_rate=lr_F)
+    optimizer_G = tf.keras.optimizers.Adam(learning_rate=lr_G)
+    optimizer_A = tf.keras.optimizers.Adam(learning_rate=lr_A)
+    optimizer_x = tf.keras.optimizers.Adam(learning_rate=lr_x)
 
-  plot_interval = 5
-  f, axs = plt.subplots(ncols=2, nrows=3, constrained_layout=True)
-  #int(updates_A_TD / plot_interval - 1)
+    loss_hierarchical = []
+    loss_single = []
 
-  with tf.GradientTape(persistent=True) as tapeKF:
-    A_TD = tf.Variable(initial_value=tf.zeros([order, order]) * 0.1, trainable=True, name="A_TD")
-    F = tf.Variable(initial_value=tf.random.uniform([order, order]) * 0.1, trainable=True, name="F")
-    G = tf.Variable(initial_value=tf.random.uniform([order, order]) * 0.1, trainable=True, name="G")
-    A = tf.Variable(initial_value=tf.random.uniform([order, order]) * 0.1, trainable=True, name="A")
-    B = tf.cast([0., 0.1], dtype=tf.float32)
+    with tf.GradientTape(persistent=True) as tapeKF:
+      A_TD = tf.Variable(initial_value=tf.zeros([order, order]) * 0.1, trainable=True, name="A_TD")
+      F = tf.Variable(initial_value=tf.random.uniform([order, order]) * 0.1, trainable=True, name="F")
+      G = tf.Variable(initial_value=tf.random.uniform([order, order]) * 0.1, trainable=True, name="G")
+      A = tf.Variable(initial_value=tf.random.uniform([order, order]) * 0.1, trainable=True, name="A")
+      B = tf.cast([0., 0.1], dtype=tf.float32)
 
-    xhat_TD = tf.Variable(initial_value=tf.zeros([order]), trainable=True, name="xhat_TD")
-    xhat = tf.Variable(initial_value=tf.zeros([order]), trainable=True, name="xhat")
+      xhat_TD = tf.Variable(initial_value=tf.zeros([order]), trainable=True, name="xhat_TD")
+      xhat = tf.Variable(initial_value=tf.zeros([order]), trainable=True, name="xhat")
 
-  plt_col = -1
-  f, axs = plt.subplots(ncols=2, nrows=3, constrained_layout=True)
-  for use_top_down in [True, False]:
-    plt_col += 1
-    plt_row = -1
-    states_l1 = np.zeros([data.shape[0], order])
-    for update_A_TD in range(updates_A_TD):
-      for update_A in range(updates_A):
-        with tapeKF:
-          tapeKF.reset()
-          A = tf.Variable(initial_value=tf.random.uniform([order, order]) * 0.1, trainable=True, name="A")
-          xhat = tf.Variable(initial_value=tf.zeros([order]), trainable=True, name="xhat")
-          optimizer_A = tf.keras.optimizers.Adam(learning_rate=lr_A)
-          optimizer_x = tf.keras.optimizers.Adam(learning_rate=lr_x)
-          optimizer_F = tf.keras.optimizers.Adam(learning_rate=lr_F)
-          optimizer_G = tf.keras.optimizers.Adam(learning_rate=lr_G)
-        with tapeKF:
-          H = tf.Variable(initial_value=tf.concat([[1.], tf.zeros(order - 1)], axis=0), trainable=False)
-          phat = tf.random.uniform([order, order]) * 1.
-          C = tf.eye(order)
-          ohats = []
-          ohats_posterior = []
-          MSE_seq = 0.
-          if not use_top_down:
-            states_l1 = np.zeros_like(states_l1)
-        for n in range(data.shape[0] - 1):
-          y = data[n, 1]
-          xhat_TD = tf.cast(states_l1[n], dtype=tf.float32)
-          ohats.append(tf_dot(H, tf_dot(F, xhat) + tf_dot(G, xhat_TD)).numpy())  # prediction from prior
-          for update_x in range(updates_xhat):
-              with tapeKF:
-                #xhat_both = tf_dot(F, xhat) + tf_dot(G, xhat_TD) #+ tf_dot(B, u)
-                xhat_both = tf_dot(F, xhat) + tf_dot(G, xhat_TD)  # + tf_dot(B, u)
-                ex = tf.reduce_mean(tf.math.square(tf_dot(phat, (xhat_both - (tf_dot(A, xhat_both))))))
-                ey = tf.reduce_mean(tf.math.square(y - tf_dot(H, xhat_both)))
-                MSE = ex+ey
-                if use_top_down:
-                  loss_hierarchical.append(MSE.numpy())
-                else:
-                  loss_single.append(MSE.numpy())
-              optimizer_F.apply_gradients(zip(tapeKF.gradient(MSE, [F]), [F]))
-              optimizer_G.apply_gradients(zip(tapeKF.gradient(MSE, [G]), [G]))
-              optimizer_x.apply_gradients(zip(tapeKF.gradient(MSE, [xhat]), [xhat])) # x not MSE
-              optimizer_A.apply_gradients(zip(tapeKF.gradient(MSE, [A]), [A]))
+    plt_col = -1
+    f, axs = plt.subplots(ncols=2, nrows=updates_A_TD, constrained_layout=True)
+    for use_top_down in [True, False]:
+      plt_col += 1
+      plt_row = -1
+      states_l1 = np.zeros([data.shape[0], order])
+      for update_A_TD in range(updates_A_TD):
+        for update_A in range(updates_A):
           with tapeKF:
-            MSE_seq = MSE_seq+MSE
-          ohats_posterior.append(tf_dot(H, tf_dot(F, xhat) + tf_dot(G, xhat_TD)).numpy())  # prediction from posterior
-          states_l1[n] = xhat.numpy()
-        xhat_TD = tf.identity(xhat)
+            tapeKF.reset()
+            A = tf.Variable(initial_value=tf.random.uniform([order, order]) * 0.1, trainable=True, name="A")
+            xhat = tf.Variable(initial_value=tf.zeros([order]), trainable=True, name="xhat")
+            optimizer_A = tf.keras.optimizers.Adam(learning_rate=lr_A)
+            optimizer_x = tf.keras.optimizers.Adam(learning_rate=lr_x)
+            optimizer_F = tf.keras.optimizers.Adam(learning_rate=lr_F)
+            optimizer_G = tf.keras.optimizers.Adam(learning_rate=lr_G)
+          with tapeKF:
+            H = tf.Variable(initial_value=tf.concat([[1.], tf.zeros(order - 1)], axis=0), trainable=False)
+            phat = tf.random.uniform([order, order]) * 1.
+            C = tf.eye(order)
+            ohats = []
+            ohats_posterior = []
+            MSE_seq = 0.
+            if not use_top_down:
+              states_l1 = np.zeros_like(states_l1)
+          for n in range(data.shape[0] - 1):
+            y = data[n, 1]
+            xhat_TD = tf.cast(states_l1[n], dtype=tf.float32)
+            ohats.append(tf_dot(H, tf_dot(F, xhat) + tf_dot(G, xhat_TD)).numpy())  # prediction from prior
+            for update_x in range(updates_xhat):
+                with tapeKF:
+                  #xhat_both = tf_dot(F, xhat) + tf_dot(G, xhat_TD) #+ tf_dot(B, u)
+                  xhat_both = tf_dot(F, xhat) + tf_dot(G, xhat_TD)  # + tf_dot(B, u)
+                  ex = tf.reduce_mean(tf.math.abs(tf_dot(phat, (xhat_both - (tf_dot(A, xhat_both))))))
+                  ey = tf.reduce_mean(tf.math.abs(y - tf_dot(H, xhat_both)))
+                  MSE = ex+ey
+                  if use_top_down:
+                    loss_hierarchical.append(MSE.numpy())
+                  else:
+                    loss_single.append(MSE.numpy())
+                optimizer_F.apply_gradients(zip(tapeKF.gradient(MSE, [F]), [F]))
+                optimizer_G.apply_gradients(zip(tapeKF.gradient(MSE, [G]), [G]))
+                optimizer_x.apply_gradients(zip(tapeKF.gradient(MSE, [xhat]), [xhat])) # x not MSE
+                optimizer_A.apply_gradients(zip(tapeKF.gradient(MSE, [A]), [A]))
+            with tapeKF: MSE_seq = MSE_seq+MSE
+            ohats_posterior.append(tf_dot(H, tf_dot(F, xhat) + tf_dot(G, xhat_TD)).numpy())  # prediction from posterior
+            states_l1[n] = xhat.numpy()
+          xhat_TD = tf.identity(xhat)
 
-      if update_A_TD % plot_interval == 0:
-        if not update_A_TD == 0:
-          plt_row += 1
-          info = "Update A_TD:"+str(update_A_TD)+" Update A:"+str(update_A)+" MSE:"+str(MSE.numpy())
-          print(info)
-          if update_A_TD == updates_A_TD-1:
-            axs[plt_row, plt_col].plot(data[:, 1], label="Target signal", color="black")
-            axs[plt_row, plt_col].plot(ohats, label="Prior prediction", color="blue")
-            axs[plt_row, plt_col].plot(ohats_posterior, label="Posterior prediction", color="green")
-          else:
-            axs[plt_row, plt_col].plot(data[:, 1], color="black")
-            axs[plt_row, plt_col].plot(ohats, color="blue")
-            axs[plt_row, plt_col].plot(ohats_posterior, label="Posterior prediction", color="green")
-          axs[plt_row, plt_col].grid()
-          #axs[plt_row, plt_col].scatter(x=[0], y=[ohats[0]], c='b')
-          #axs[plt_row, plt_col].scatter(x=[0], y=[ohats_posterior[0]], c='g')
-          axs[plt_row, plt_col].set_ylim([-1, 2.])
-          #axs[plt_row, plt_col].set_xlabel("Time (samples)")
-          #axs[plt_row, plt_col].set_ylabel("Amplitude")
-          axs[plt_row, plt_col].title.set_text('Update ' + str(update_A_TD))
-    axs[-1, 0].set_xlabel("Time (samples)")
-    axs[-1, 1].set_xlabel("Time (samples)")
-    axs[0, 0].set_ylabel("Amplitude")
-    axs[1, 0].set_ylabel("Amplitude")
-    axs[2, 0].set_ylabel("Amplitude")
+        if update_A_TD % plot_interval == 0:
+          if not update_A_TD == 0:
+            plt_row += 1
+            info = "Update A_TD:"+str(update_A_TD)+" Update A:"+str(update_A)+" MSE:"+str(MSE.numpy())
+            print(info)
+            if update_A_TD == updates_A_TD-1:
+              axs[plt_row, plt_col].plot(data[:, 1], label="Target signal", color="black")
+              axs[plt_row, plt_col].plot(ohats, label="Prior prediction", color="blue")
+              axs[plt_row, plt_col].plot(ohats_posterior, label="Posterior prediction", color="green")
+            else:
+              axs[plt_row, plt_col].plot(data[:, 1], color="black")
+              axs[plt_row, plt_col].plot(ohats, color="blue")
+              axs[plt_row, plt_col].plot(ohats_posterior, label="Posterior prediction", color="green")
+            axs[plt_row, plt_col].grid()
+            #axs[plt_row, plt_col].scatter(x=[0], y=[ohats[0]], c='b')
+            #axs[plt_row, plt_col].scatter(x=[0], y=[ohats_posterior[0]], c='g')
+            axs[plt_row, plt_col].set_ylim([0., 4.])
+            #axs[plt_row, plt_col].set_xlabel("Time (samples)")
+            #axs[plt_row, plt_col].set_ylabel("Amplitude")
+            axs[plt_row, plt_col].title.set_text('Update ' + str(update_A_TD))
+      axs[-1, 0].set_xlabel("Time (samples)")
+      axs[-1, 1].set_xlabel("Time (samples)")
+      axs[0, 0].set_ylabel("Amplitude")
+      axs[1, 0].set_ylabel("Amplitude")
+      axs[2, 0].set_ylabel("Amplitude")
+
+      """
+      plt.xlabel("Time (samples)")
+      plt.ylabel("Amplitude")
+      plt.grid()
+      plt.legend(loc='lower left')
+      plt.ylim((-0.1, 1.2))
+      if use_top_down:
+        #plt.title("Hierarchical predictive coding model")
+        plt.tight_layout()
+        f.savefig("./hierarchical.pdf")
+        plt.show()
+      else:
+        #plt.title("Single layer predictive coding model")
+        plt.tight_layout()
+        f.savefig("./singlelayer.pdf")
+        plt.show()
+      """
+    f.savefig("./both_"+str(updates_xhat)+"_TDupdates_"+str(updates_A_TD)+"_LRx_"+str(lr_x)+".pdf")
+    plt.show()
 
     """
-    plt.xlabel("Time (samples)")
-    plt.ylabel("Amplitude")
+    f = plt.figure()
+    plt.plot(loss_hierarchical)
+    plt.xlabel("Update")
+    plt.ylabel("Sensory prediction error")
+    #plt.title("Hierarchical predictive coding model")
     plt.grid()
-    plt.legend(loc='lower left')
-    plt.ylim((-0.1, 1.2))
-    if use_top_down:
-      #plt.title("Hierarchical predictive coding model")
-      plt.tight_layout()
-      f.savefig("./hierarchical.pdf")
-      plt.show()
-    else:
-      #plt.title("Single layer predictive coding model")
-      plt.tight_layout()
-      f.savefig("./singlelayer.pdf")
-      plt.show()
+    plt.tight_layout()
+    f.savefig("./hierarchical_posterior.pdf")
+    plt.show()
+
+    f = plt.figure()
+    plt.plot(loss_single)
+    plt.xlabel("Update")
+    plt.ylabel("Sensory prediction error")
+    #plt.title("Single layer predictive coding model")
+    plt.grid()
+    plt.tight_layout()
+    f.savefig("./singlelayer_posterior.pdf")
+    plt.show()
     """
-  f.savefig("./both_"+str(updates_xhat)+".pdf")
-  plt.show()
-
-  f = plt.figure()
-  plt.plot(loss_hierarchical)
-  plt.xlabel("Update")
-  plt.ylabel("Sensory prediction error")
-  #plt.title("Hierarchical predictive coding model")
-  plt.grid()
-  plt.tight_layout()
-  f.savefig("./hierarchical_posterior.pdf")
-  plt.show()
-
-  f = plt.figure()
-  plt.plot(loss_single)
-  plt.xlabel("Update")
-  plt.ylabel("Sensory prediction error")
-  #plt.title("Single layer predictive coding model")
-  plt.grid()
-  plt.tight_layout()
-  f.savefig("./singlelayer_posterior.pdf")
-  plt.show()
 
