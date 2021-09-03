@@ -880,22 +880,26 @@ if run_HPC_speech:
   import matplotlib.pyplot as plt
   import matplotlib.gridspec as gridspec
 
-  frame_length = 128
-  hop_length = 128
+  frame_length = 32
+  hop_length = 32
 
   #sr, x = wavfile.read(pysptk.util.example_audio_file())
 
   sr = 256
   wave_hz = 10
-  duration = 1
+  duration = 5
   t = np.linspace(0, duration, sr, endpoint=False)
   x = signal.square(2 * np.pi * wave_hz * t)
-  #plt.plot(t, x)
+
+  time = np.arange(0, len(x), 1)
+  x = np.sin(time)
+  #plt.plot(time, amplitude)
   #plt.show()
 
-  #ime = np.arange(0, 10, 0.1)
-  #amplitude = np.sin(time)
-  #plot.plot(time, amplitude)
+  x = x.astype(np.float32)
+  x /= np.abs(x).max()
+
+  #plt.plot(t, x)
   #plt.show()
 
   x = x.astype(np.float32)
@@ -929,12 +933,12 @@ if run_HPC_speech:
   lr_F = 0.01 #0.1
   lr_G = 0.01 #0.1
 
-  updates_A_TD = 3 #20
+  updates_A_TD = 6 #20
   updates_A = 1 #1
 
   plot_interval = 1
 
-  for updates_xhat in [3, 5, 10, 15, 20]:
+  for updates_xhat in [10]:
     alphas = np.linspace(0,1,updates_A_TD+1)
     alphas_A = np.linspace(0, 1, updates_A + 1)
 
@@ -957,7 +961,7 @@ if run_HPC_speech:
       xhat = tf.Variable(initial_value=tf.zeros([order]), trainable=True, name="xhat")
 
     plt_col = -1
-    f, axs = plt.subplots(ncols=2, nrows=updates_A_TD, constrained_layout=True)
+    f, axs = plt.subplots(ncols=2, nrows=5, constrained_layout=True)
     for use_top_down in [True, False]:
       plt_col += 1
       plt_row = -1
@@ -974,6 +978,7 @@ if run_HPC_speech:
             optimizer_G = tf.keras.optimizers.Adam(learning_rate=lr_G)
           with tapeKF:
             H = tf.Variable(initial_value=tf.concat([[1.], tf.zeros(order - 1)], axis=0), trainable=False)
+            #H = tf.eye(order)
             phat = tf.random.uniform([order, order]) * 1.
             C = tf.eye(order)
             ohats = []
@@ -989,8 +994,8 @@ if run_HPC_speech:
                 with tapeKF:
                   #xhat_both = tf_dot(F, xhat) + tf_dot(G, xhat_TD) #+ tf_dot(B, u)
                   xhat_both = tf_dot(F, xhat) + tf_dot(G, xhat_TD)  # + tf_dot(B, u)
-                  ex = tf.reduce_mean(tf.math.abs(tf_dot(phat, (xhat_both - (tf_dot(A, xhat_both))))))
-                  ey = tf.reduce_mean(tf.math.abs(y - tf_dot(H, xhat_both)))
+                  ex = tf.reduce_mean(tf.math.square(tf_dot(phat, (xhat_both - (tf_dot(A, xhat_both))))))
+                  ey = tf.reduce_mean(tf.math.square(y - tf_dot(H, xhat_both)))
                   MSE = ex+ey
                   if use_top_down:
                     loss_hierarchical.append(MSE.numpy())
@@ -1061,7 +1066,6 @@ if run_HPC_speech:
     plt.tight_layout()
     f.savefig("./hierarchical_posterior.pdf")
     plt.show()
-
     f = plt.figure()
     plt.plot(loss_single)
     plt.xlabel("Update")
@@ -1072,4 +1076,3 @@ if run_HPC_speech:
     f.savefig("./singlelayer_posterior.pdf")
     plt.show()
     """
-
